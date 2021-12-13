@@ -1,0 +1,13 @@
+name: Run pull-request functional workflows
+on:
+- pull_request
+jobs:
+  functional_defaults_check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v2
+      - name: Set up Python
+        uses: actions/setup-python@v2
+      - name: Run install
+        run: sudo python iodict/tests/runlocal.py
