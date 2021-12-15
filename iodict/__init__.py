@@ -55,10 +55,13 @@ def _get_item_key(path: str):
     try:
         return os.getxattr(path, "user.key").decode()
     except OSError:
+        if not os.path.exists(path):
+            raise FileNotFoundError(path) from None
+        path_basename = os.path.basename(path)
         try:
-            return base64.b64decode(os.path.basename(path)).decode()
+            return base64.b64decode(path_basename).decode()
         except UnicodeDecodeError:
-            return pickle.loads(base64.b64decode(os.path.basename(path)))
+            return pickle.loads(base64.b64decode(path_basename))
 
 
 def _makedirs(path: str, key: _KT = None):
@@ -276,30 +279,25 @@ class IODict(BaseClass):
         :returns: List || :yield: Object
         """
         try:
-            items = os.listdir(self._db_path)
-            if not items:
-                return list()
-
             with Popd(path=self._db_path):
-                items = sorted(
-                    filter(os.path.exists, items),
-                    key=_get_create_time,
-                )
-
-            if index is not None and isinstance(index, int):
-                yield _get_item_key(
-                    path=os.path.join(self._db_path, items[index])
-                )
-            else:
-                for item in items:
-                    try:
-                        yield _get_item_key(
-                            path=os.path.join(self._db_path, item)
-                        )
-                    except GeneratorExit:
-                        pass
+                with self._lock:
+                    items = sorted(
+                        filter(os.path.exists, os.listdir()),
+                        key=_get_create_time,
+                    )
         except FileNotFoundError:
             return list()
+
+        if not items:
+            return list()
+        elif index is not None and isinstance(index, int):
+            yield _get_item_key(path=os.path.join(self._db_path, items[index]))
+        else:
+            for item in items:
+                try:
+                    yield _get_item_key(path=os.path.join(self._db_path, item))
+                except (GeneratorExit, FileNotFoundError):
+                    pass
 
     def __len__(self):
         """Return a count of all keys in the datastore.

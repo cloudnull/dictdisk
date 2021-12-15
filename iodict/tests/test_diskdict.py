@@ -11,8 +11,6 @@
 #   WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #   License for the specific language governing permissions and limitations
 #   under the License.
-from unittest import mock
-from builtins import FileExistsError, KeyError
 import pickle
 import unittest
 
@@ -305,21 +303,27 @@ class TestIODict(unittest.TestCase):
             mock__getitem__.side_effect = KeyError
             self.assertEqual(d.get("file1", "default"), "default")
 
+    @patch("os.path.exists", autospec=True)
     @patch("os.getxattr", autospec=True)
-    def test__get_item_key(self, mock_getxattr):
+    def test__get_item_key(self, mock_getxattr, mock_exists):
         mock_getxattr.side_effect = [b"key1"]
+        mock_exists.return_value = True
         keyname = iodict._get_item_key("/not/a/path")
         self.assertEqual(keyname, "key1")
 
+    @patch("os.path.exists", autospec=True)
     @patch("os.getxattr", autospec=True)
-    def test__get_item_key(self, mock_getxattr):
+    def test__get_item_key_b64(self, mock_getxattr, mock_exists):
         mock_getxattr.side_effect = OSError
+        mock_exists.return_value = True
         keyname = iodict._get_item_key("/not/a/a2V5MQ==")
         self.assertEqual(keyname, "key1")
 
+    @patch("os.path.exists", autospec=True)
     @patch("os.getxattr", autospec=True)
-    def test__get_item_key_unicode(self, mock_getxattr):
+    def test__get_item_key_unicode(self, mock_getxattr, mock_exists):
         mock_getxattr.side_effect = OSError
+        mock_exists.return_value = True
         keyname = iodict._get_item_key("/not/a/gAR9lC4=")
         self.assertEqual(keyname, {})
 

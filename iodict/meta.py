@@ -14,4 +14,4 @@
 
 __author__ = "Kevin Carter"
 __email__ = "kevin@peznauts.com"
-__version__ = "0.0.0"
+__version__ = "0.0.1"
