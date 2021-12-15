@@ -12,9 +12,9 @@
 #   License for the specific language governing permissions and limitations
 #   under the License.
 
-import base64
 import hashlib
 import multiprocessing
+import operator
 import os
 import pickle
 import struct
@@ -53,15 +53,13 @@ def _get_item_key(path: str):
     :returns: String
     """
     try:
-        return os.getxattr(path, "user.key").decode()
+        key = os.getxattr(path, "user.key")
     except OSError:
         if not os.path.exists(path):
             raise FileNotFoundError(path) from None
-        path_basename = os.path.basename(path)
-        try:
-            return base64.b64decode(path_basename).decode()
-        except UnicodeDecodeError:
-            return pickle.loads(base64.b64decode(path_basename))
+        return os.path.basename(path)
+    else:
+        return key.decode()
 
 
 def _makedirs(path: str, key: _KT = None):
@@ -88,24 +86,6 @@ def _object_sha3_224(obj: object):
         return hashlib.sha3_224(obj.encode()).hexdigest()
     except AttributeError:
         return hashlib.sha3_224(pickle.dumps(obj)).hexdigest()
-
-
-def _object_b64(obj: object):
-    """Return the base64 encoding of a given object.
-
-    The object used for generating a SHA3_224 must be JSON compatible.
-
-    :param file_path: File path
-    :type file_path: String
-    :returns: String
-    """
-    try:
-        return base64.b64encode(obj).decode()
-    except TypeError:
-        try:
-            return base64.b64encode(obj.encode()).decode()
-        except AttributeError:
-            return base64.b64encode(pickle.dumps(obj)).decode()
 
 
 def _setxattr(path: str, key: _KT = None):
@@ -150,43 +130,6 @@ class BaseClass:
         return True
 
 
-class Popd(BaseClass):
-    """Base directory entry and exit class."""
-
-    def __init__(self, path: str):
-        """Initialze the popd class.
-
-        This context manager will change directtory and return to the original
-        directory on exit.
-
-        :param path: Storage path
-        :type path: String
-        """
-        self.cwd = os.getcwd()
-        self.path = path
-
-    def __enter__(self):
-        """Enter the context manager and change directory.
-
-        :returns: Boolean
-        """
-        os.chdir(self.path)
-
-    def __exit__(
-        self, exc_type: typing.Any, exc_value: typing.Any, tb: typing.Any
-    ):
-        """Return to the original directory and exit the context manager.
-
-        :returns: Boolean
-        """
-        try:
-            os.chdir(self.cwd)
-        except Exception:
-            pass
-        finally:
-            return super().__exit__(exc_type, exc_value, tb)
-
-
 class IODict(BaseClass):
     def __init__(self, path: str, lock: typing.Any = None):
         """Initialize the POSIX compatible datastore.
@@ -216,7 +159,7 @@ class IODict(BaseClass):
         try:
             os.listxattr(self._db_path)
         except Exception:
-            self._encoder = _object_b64
+            self._encoder = str
         else:
             self._encoder = _object_sha3_224
 
@@ -278,25 +221,40 @@ class IODict(BaseClass):
         :type index: Integer
         :returns: List || :yield: Object
         """
-        try:
-            with Popd(path=self._db_path):
-                with self._lock:
-                    items = sorted(
-                        filter(os.path.exists, os.listdir()),
-                        key=_get_create_time,
-                    )
-        except FileNotFoundError:
-            return list()
+        items = list()
+        if not os.path.exists(self._db_path):
+            return items
 
+        for item in os.scandir(self._db_path):
+            if not os.path.exists(item):
+                continue
+
+            try:
+                items.append(
+                    (
+                        _get_item_key(item.path),
+                        _get_create_time(item.path),
+                        item.path,
+                    )
+                )
+            except FileNotFoundError:
+                pass
+
+        items = sorted(items, key=operator.itemgetter(1))
         if not items:
             return list()
         elif index is not None and isinstance(index, int):
-            yield _get_item_key(path=os.path.join(self._db_path, items[index]))
+            if not os.path.exists(items[index][-1]):
+                self.__iter__(index=index)
+            else:
+                yield items[index][0]
         else:
             for item in items:
+                if not os.path.exists(item[-1]):
+                    continue
                 try:
-                    yield _get_item_key(path=os.path.join(self._db_path, item))
-                except (GeneratorExit, FileNotFoundError):
+                    yield item[0]
+                except GeneratorExit:
                     pass
 
     def __len__(self):

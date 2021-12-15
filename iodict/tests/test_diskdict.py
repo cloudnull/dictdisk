@@ -20,6 +20,11 @@ from unittest.mock import patch
 import iodict
 
 
+class MockItem:
+    def __init__(self, path):
+        self.path = path
+
+
 class MockStat:
     def __init__(*args, **kwargs) -> None:
         pass
@@ -78,7 +83,7 @@ class TestIODict(unittest.TestCase):
     def test_init_no_xattr(self, mock_listxattr):
         mock_listxattr.side_effect = OSError("error")
         d = iodict.IODict(path="/not/a/path")
-        assert d._encoder == iodict._object_b64
+        assert d._encoder == str
 
     @patch("os.listxattr", autospec=True)
     @patch("os.unlink", autospec=True)
@@ -93,7 +98,7 @@ class TestIODict(unittest.TestCase):
     def test__delitem___no_xattr(self, mock_unlink):
         d = iodict.IODict(path="/not/a/path")
         d.__delitem__("not-an-item")
-        mock_unlink.assert_called_with("/not/a/path/bm90LWFuLWl0ZW0=")
+        mock_unlink.assert_called_with("/not/a/path/not-an-item")
 
     @patch("os.unlink", autospec=True)
     def test__delitem__missing(self, mock_unlink):
@@ -102,8 +107,9 @@ class TestIODict(unittest.TestCase):
         with self.assertRaises(KeyError):
             d.__delitem__("not-an-item")
 
+    @patch("os.scandir", autospec=True)
     @patch("os.listxattr", autospec=True)
-    def test__exit__(self, mock_listxattr):
+    def test__exit__(self, mock_listxattr, mock_scandir):
         with patch("builtins.open", unittest.mock.mock_open()):
             with patch.object(
                 iodict.IODict, "clear", autospec=True
@@ -130,28 +136,47 @@ class TestIODict(unittest.TestCase):
             with self.assertRaises(KeyError):
                 d.__getitem__("not-an-item")
 
-    @patch("os.listdir", autospec=True)
+    @patch("os.scandir", autospec=True)
     @patch("os.path.exists", autospec=True)
     @patch("os.getcwd", autospec=True)
     @patch("os.chdir", autospec=True)
-    def test__iter__(self, mock_chdir, mock_getcwd, mock_exists, mock_listdir):
+    def test__iter__(self, mock_chdir, mock_getcwd, mock_exists, mock_scandir):
         mock_getcwd.return_value = "/"
         mock_exists.return_value = True
-        mock_listdir.return_value = ["file1", "file2"]
+        mock_scandir.return_value = [MockItem("file1"), MockItem("file2")]
         d = iodict.IODict(path="/not/a/path")
         with patch("os.getxattr") as mock_getxattr:
             mock_getxattr.side_effect = [
-                b"A\xd8kl\xc1\xb1\xd9]",
-                b"A\xd8kn\x0f}\xda\x16",
                 b"key1",
+                b"A\xd8kl\xc1\xb1\xd9]",
                 b"key2",
+                b"A\xd8kn\x0f}\xda\x16",
             ]
-            self.assertEqual([i for i in d.__iter__()], ["key1", "key2"])
-        mock_chdir.assert_has_calls([call("/not/a/path"), call("/")])
+            return_items = [i for i in d.__iter__()]
+            self.assertEqual(return_items, ["key1", "key2"])
+
+    @patch("os.scandir", autospec=True)
+    @patch("os.path.exists", autospec=True)
+    @patch("os.getcwd", autospec=True)
+    @patch("os.chdir", autospec=True)
+    def test__iter__not_found(
+        self, mock_chdir, mock_getcwd, mock_exists, mock_scandir
+    ):
+        mock_getcwd.return_value = "/"
+        mock_exists.return_value = True
+        mock_scandir.return_value = [MockItem("file1")]
+        d = iodict.IODict(path="/not/a/path")
+        with patch("os.getxattr") as mock_getxattr:
+            mock_getxattr.side_effect = [
+                b"key1",
+                b"A\xd8kn\x0f}\xda\x16",
+                FileNotFoundError,
+            ]
+            return_items = [i for i in d.__iter__()]
+            self.assertEqual(return_items, ["key1"])
 
     @patch("os.stat", autospec=True)
-    @patch("os.getxattr", autospec=True)
-    @patch("os.listdir", autospec=True)
+    @patch("os.scandir", autospec=True)
     @patch("os.path.exists", autospec=True)
     @patch("os.getcwd", autospec=True)
     @patch("os.chdir", autospec=True)
@@ -160,81 +185,58 @@ class TestIODict(unittest.TestCase):
         mock_chdir,
         mock_getcwd,
         mock_exists,
-        mock_listdir,
-        mock_getxattr,
+        mock_scandir,
         mock_stat,
     ):
         mock_getcwd.return_value = "/"
         mock_exists.return_value = True
-        mock_listdir.return_value = ["ZmlsZTE=", "ZmlsZTI="]
-        mock_getxattr.side_effect = OSError
-        d = iodict.IODict(path="/not/a/path")
-        mock_stat.return_value = MockStat()
-        return_items = [i for i in d.__iter__()]
-        self.assertEqual(return_items, ["file1", "file2"])
-        mock_stat.assert_has_calls([call("ZmlsZTE="), call("ZmlsZTI=")])
-        mock_chdir.assert_has_calls([call("/not/a/path"), call("/")])
-
-    @patch("os.listdir", autospec=True)
-    @patch("os.path.exists", autospec=True)
-    @patch("os.getcwd", autospec=True)
-    @patch("os.chdir", autospec=True)
-    def test__iter__raise_exit(
-        self, mock_chdir, mock_getcwd, mock_exists, mock_listdir
-    ):
-        mock_getcwd.return_value = "/"
-        mock_exists.return_value = True
-        mock_listdir.return_value = ["file1", "file2"]
+        mock_scandir.return_value = [
+            MockItem("key1"),
+            MockItem("key2"),
+        ]
         d = iodict.IODict(path="/not/a/path")
         with patch("os.getxattr") as mock_getxattr:
-            mock_getxattr.side_effect = [
-                b"A\xd8kl\xc1\xb1\xd9]",
-                b"A\xd8kn\x0f}\xda\x16",
-                b"key1",
-                b"key2",
-            ]
-            with patch.object(
-                iodict, "_get_item_key", autospec=True
-            ) as mock_get_item_key:
-                mock_get_item_key.side_effect = GeneratorExit
-                return_items = [i for i in d.__iter__()]
-                self.assertEqual(return_items, [])
+            mock_getxattr.side_effect = OSError
+            mock_stat.return_value = MockStat()
+            return_items = [i for i in d.__iter__()]
+            self.assertEqual(return_items, ["key1", "key2"])
 
-    @patch("os.listdir", autospec=True)
+    @patch("os.scandir", autospec=True)
     @patch("os.path.exists", autospec=True)
     @patch("os.getcwd", autospec=True)
     @patch("os.chdir", autospec=True)
     def test__iter__index(
-        self, mock_chdir, mock_getcwd, mock_exists, mock_listdir
+        self, mock_chdir, mock_getcwd, mock_exists, mock_scandir
     ):
         mock_getcwd.return_value = "/"
         mock_exists.return_value = True
-        mock_listdir.return_value = ["file1", "file2"]
+        mock_scandir.return_value = [MockItem("file1"), MockItem("file2")]
         d = iodict.IODict(path="/not/a/path")
         with patch("os.getxattr") as mock_getxattr:
             mock_getxattr.side_effect = [
-                b"A\xd8kl\xc1\xb1\xd9]",
-                b"A\xd8kn\x0f}\xda\x16",
                 b"key1",
+                b"A\xd8kn\x0f}\xda\x16",
                 b"key2",
+                b"A\xd8kl\xc1\xb1\xd9]",
             ]
             self.assertEqual([i for i in d.__iter__(index=1)], ["key1"])
-        mock_chdir.assert_has_calls([call("/not/a/path"), call("/")])
 
-    @patch("os.listdir", autospec=True)
+    @patch("os.scandir", autospec=True)
     @patch("os.path.exists", autospec=True)
     @patch("os.getcwd", autospec=True)
     @patch("os.chdir", autospec=True)
     def test__iter__no_items(
-        self, mock_chdir, mock_getcwd, mock_exists, mock_listdir
+        self, mock_chdir, mock_getcwd, mock_exists, mock_scandir
     ):
         mock_getcwd.return_value = "/"
         mock_exists.return_value = True
-        mock_listdir.return_value = []
+        mock_scandir.return_value = []
         d = iodict.IODict(path="/not/a/path")
         self.assertEqual([i for i in d.__iter__()], [])
 
-    def test__len__zero(self):
+    @patch("os.scandir", autospec=True)
+    def test__len__zero(self, mock_scandir):
+        mock_scandir.return_value = []
         d = iodict.IODict(path="/not/a/path")
         self.assertEqual(len(d), 0)
 
@@ -313,19 +315,19 @@ class TestIODict(unittest.TestCase):
 
     @patch("os.path.exists", autospec=True)
     @patch("os.getxattr", autospec=True)
-    def test__get_item_key_b64(self, mock_getxattr, mock_exists):
-        mock_getxattr.side_effect = OSError
-        mock_exists.return_value = True
-        keyname = iodict._get_item_key("/not/a/a2V5MQ==")
-        self.assertEqual(keyname, "key1")
-
-    @patch("os.path.exists", autospec=True)
-    @patch("os.getxattr", autospec=True)
     def test__get_item_key_unicode(self, mock_getxattr, mock_exists):
         mock_getxattr.side_effect = OSError
         mock_exists.return_value = True
         keyname = iodict._get_item_key("/not/a/gAR9lC4=")
         self.assertEqual(keyname, {})
+
+    @patch("os.path.exists", autospec=True)
+    @patch("os.getxattr", autospec=True)
+    def test__get_item_key_unicode(self, mock_getxattr, mock_exists):
+        mock_getxattr.side_effect = OSError
+        mock_exists.return_value = False
+        with self.assertRaises(FileNotFoundError):
+            iodict._get_item_key("/not/a/gAR9lC4=")
 
     def test_fromkeys(self):
         d = iodict.IODict(path="/not/a/path")
@@ -355,15 +357,6 @@ class TestIODict(unittest.TestCase):
         self.assertEqual(
             return_items, [("file1", "value1"), ("file2", "value2")]
         )
-
-    def test__object_b64(self):
-        self.assertEqual(iodict._object_b64("testing"), "dGVzdGluZw==")
-
-    def test__object_b64_bytes(self):
-        self.assertEqual(iodict._object_b64(b"testing"), "dGVzdGluZw==")
-
-    def test__object_b64_pickled(self):
-        self.assertEqual(iodict._object_b64(list()), "gARdlC4=")
 
     def test_keys(self):
         d = iodict.IODict(path="/not/a/path")
@@ -442,24 +435,6 @@ class TestIODict(unittest.TestCase):
                     d.pop("file1")
                 mock__delitem__.assert_called_with("file1")
 
-    @patch("os.getcwd", autospec=True)
-    @patch("os.chdir", autospec=True)
-    def test_popd(self, mock_chdir, mock_getcwd):
-        mock_getcwd.return_value = "/"
-        with iodict.Popd("/not/a/path"):
-            pass
-        mock_chdir.assert_has_calls([call("/not/a/path"), call("/")])
-
-    @patch("os.getcwd", autospec=True)
-    @patch("os.chdir", autospec=True)
-    def test_popd___exit__exception(self, mock_chdir, mock_getcwd):
-        mock_getcwd.return_value = "/"
-        mock_chdir.side_effect = [True, NotADirectoryError]
-        with iodict.Popd("/not/a/path") as x:
-            pass
-        self.assertFalse(x)
-        mock_chdir.assert_has_calls([call("/not/a/path"), call("/")])
-
     def test_popitem(self):
         d = iodict.IODict(path="/not/a/path")
         with patch.object(d, "__getitem__", autospec=True):
@@ -487,7 +462,8 @@ class TestIODict(unittest.TestCase):
                         with self.assertRaises(KeyError):
                             d.popitem()
 
-    def test_repr(self):
+    @patch("os.scandir", autospec=True)
+    def test_repr(self, mock_scandir):
         d = iodict.IODict(path="/not/a/path")
         self.assertEqual(d.__repr__(), "{}")
 
