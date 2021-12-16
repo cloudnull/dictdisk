@@ -1,6 +1,5 @@
 name: Test RPM workflows
 on:
-- push
 - pull_request
 jobs:
   build_test_rpms:

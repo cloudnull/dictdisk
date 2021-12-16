@@ -475,10 +475,10 @@ class TestIODict(BaseTest):
         mock_unlink.assert_called_with("/not/a/path")
 
     def test__object_sha3_224(self):
-        sha3_224 = iodict._object_sha3_224(obj={"test": "value"})
+        sha3_224 = iodict._object_sha3_224(obj={})
         self.assertEqual(
             sha3_224,
-            "72b84f14a5cc4a53bf9af53b95043617388629bf733f8b48d6fefe47",  # noqa
+            "c9a41ed41c58821906c2fc14f5cc8cb0b3bf4b380a145ad900940c5c",  # noqa
         )
 
     def test__object_sha3_224_encoding(self):
