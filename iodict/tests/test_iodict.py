@@ -11,10 +11,14 @@
 #   WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #   License for the specific language governing permissions and limitations
 #   under the License.
+from os import path
 import pickle
+import queue
 import unittest
 
+from unittest.mock import ANY
 from unittest.mock import call
+from unittest.mock import MagicMock
 from unittest.mock import patch
 
 import iodict
@@ -34,17 +38,16 @@ class MockStat:
         return 1.0
 
 
-class TestIODict(unittest.TestCase):
+class BaseTest(unittest.TestCase):
     def setUp(self):
         self.patched_makedirs = patch("os.makedirs", autospec=True)
         self.mock_makedirs = self.patched_makedirs.start()
-        self.patched_symlink = patch("os.symlink", autospec=True)
-        self.mock_symlink = self.patched_symlink.start()
 
     def tearDown(self):
         self.patched_makedirs.stop()
-        self.patched_symlink.stop()
 
+
+class TestIODict(BaseTest):
     def test_base___exit__(self):
         e = iodict.BaseClass()
         exit_value = e.__exit__(None, None, None)
@@ -235,6 +238,84 @@ class TestIODict(unittest.TestCase):
         self.assertEqual([i for i in d.__iter__()], [])
 
     @patch("os.scandir", autospec=True)
+    @patch("os.path.exists", autospec=True)
+    def test__iter__no_exist(self, mock_exists, mock_scandir):
+        mock_exists.return_value = True
+        mock_scandir.return_value = [
+            MockItem("file1"),
+            MockItem("file2"),
+            MockItem("file3"),
+        ]
+        d = iodict.IODict(path="/not/a/path")
+        with patch("os.getxattr") as mock_getxattr:
+            mock_getxattr.side_effect = [
+                b"key1",
+                b"A\xd8kn\x0f}\xda\x16",
+                FileNotFoundError,
+                FileNotFoundError,
+                b"key3",
+                b"A\xd8kl\xc1\xb1\xd9]",
+            ]
+            self.assertEqual([i for i in d.__iter__()], ["key3", "key1"])
+
+    @patch("os.scandir", autospec=True)
+    @patch("os.path.exists", autospec=True)
+    def test__iter__exist_no_exist(self, mock_exists, mock_scandir):
+        mock_exists.side_effect = [True, True, False, False]
+        mock_scandir.return_value = [
+            MockItem("file1"),
+            MockItem("file2"),
+            MockItem("file3"),
+        ]
+        d = iodict.IODict(path="/not/a/path")
+        with patch("os.getxattr") as mock_getxattr:
+            mock_getxattr.side_effect = [
+                b"key1",
+                b"A\xd8kn\x0f}\xda\x16",
+                b"key2",
+                b"A\xd8kl\xc1\xb1\xd9]",
+                b"key3",
+                b"A\xd8kl\xc1\xb1\xd9]",
+            ]
+            self.assertEqual([i for i in d.__iter__()], ["key2"])
+
+    @patch("os.scandir", autospec=True)
+    @patch("os.path.exists", autospec=True)
+    def test__iter__reindex(self, mock_exists, mock_scandir):
+        mock_exists.side_effect = [True, False, True, True]
+        mock_scandir.side_effect = [
+            [MockItem("file1"), MockItem("file2")],
+            [MockItem("file2")],
+        ]
+        d = iodict.IODict(path="/not/a/path")
+        with patch("os.getxattr") as mock_getxattr:
+            mock_getxattr.side_effect = [
+                b"key1",
+                b"A\xd8kn\x0f}\xda\x16",
+                b"key2",
+                b"A\xd8kl\xc1\xb1\xd9]",
+                b"key2",
+                b"A\xd8kl\xc1\xb1\xd9]",
+            ]
+            self.assertEqual([i for i in d.__iter__(index=0)], ["key2"])
+
+    @patch("os.scandir", autospec=True)
+    @patch("os.path.exists", autospec=True)
+    def test__iter__generatorexit(self, mock_exists, mock_scandir):
+        mock_exists.side_effect = [True, True, GeneratorExit]
+        mock_scandir.return_value = [MockItem("file1"), MockItem("file2")]
+        d = iodict.IODict(path="/not/a/path")
+        with patch("os.getxattr") as mock_getxattr:
+            mock_getxattr.side_effect = [
+                b"key1",
+                b"A\xd8kl\xc1\xb1\xd9]",
+                b"key2",
+                b"A\xd8kn\x0f}\xda\x16",
+            ]
+            return_items = [i for i in d.__iter__()]
+            self.assertEqual(return_items, ["key1"])
+
+    @patch("os.scandir", autospec=True)
     def test__len__zero(self, mock_scandir):
         mock_scandir.return_value = []
         d = iodict.IODict(path="/not/a/path")
@@ -328,6 +409,9 @@ class TestIODict(unittest.TestCase):
         mock_exists.return_value = False
         with self.assertRaises(FileNotFoundError):
             iodict._get_item_key("/not/a/gAR9lC4=")
+
+    def test__get_uuid(self):
+        self.assertEqual(type(iodict._get_uuid()), str)
 
     def test_fromkeys(self):
         d = iodict.IODict(path="/not/a/path")
@@ -507,3 +591,73 @@ class TestIODict(unittest.TestCase):
                 return_items = [i for i in d.values()]
 
         self.assertEqual(return_items, ["value1", "value2"])
+
+
+class TestDurableQueue(BaseTest):
+    def setUp(self):
+        super().setUp()
+        self.patched_iodict = patch("iodict.IODict", autospec=True)
+        self.mock_iodict = self.patched_iodict.start()
+        self.m = self.mock_iodict.return_value = MagicMock()
+        self.m._db_path = "/not/a/path"
+
+    def tearDown(self):
+        super().tearDown()
+        self.patched_iodict.stop()
+
+    def test_close(self):
+        q = iodict.DurableQueue(path="/not/a/path")
+        with patch("os.rmdir") as mock_rmdir:
+            q.close()
+            mock_rmdir.assert_called_once_with("/not/a/path")
+
+    def test_empty(self):
+        q = iodict.DurableQueue(path="/not/a/path")
+        self.assertEqual(q.empty(), True)
+        with patch.object(self.m, "__len__", autospec=True) as mock_len:
+            mock_len.return_value = 1
+            self.assertEqual(q.empty(), False)
+
+    def test_get_negative_timeout(self):
+        q = iodict.DurableQueue(path="/not/a/path")
+        with self.assertRaises(ValueError):
+            q.get(timeout=-1)
+
+    def test_get_timeout(self):
+        q = iodict.DurableQueue(path="/not/a/path")
+        with self.assertRaises(queue.Empty):
+            q.get(timeout=0.1)
+
+    def test_get(self):
+        with patch.object(self.m, "__len__", autospec=True) as mock_len:
+            mock_len.return_value = 1
+            q = iodict.DurableQueue(path="/not/a/path")
+            with patch.object(
+                self.m, "popitem", autospec=True
+            ) as mock_popitem:
+                mock_popitem.return_value = "test"
+                self.assertEqual(q.get(), "test")
+
+    def test_getnowait(self):
+        with patch.object(self.m, "__len__", autospec=True) as mock_len:
+            mock_len.return_value = 1
+            q = iodict.DurableQueue(path="/not/a/path")
+            with patch.object(
+                self.m, "popitem", autospec=True
+            ) as mock_popitem:
+                mock_popitem.return_value = "test"
+                self.assertEqual(q.get_nowait(), "test")
+
+    def test_put(self):
+        q = iodict.DurableQueue(path="/not/a/path")
+        with patch.object(self.m, "_queue", autospec=True) as mock__queue:
+            mock__queue.return_value = dict()
+            q.put("test")
+            mock__queue.assert_called()
+
+    def test_putnowait(self):
+        q = iodict.DurableQueue(path="/not/a/path")
+        with patch.object(self.m, "_queue", autospec=True) as mock__queue:
+            mock__queue.return_value = dict()
+            q.put_nowait("test")
+            mock__queue.assert_called()

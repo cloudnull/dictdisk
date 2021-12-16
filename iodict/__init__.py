@@ -17,10 +17,12 @@ import multiprocessing
 import operator
 import os
 import pickle
+import queue
 import struct
 import traceback
 import time
 import typing
+import uuid
 
 
 _S = typing.TypeVar("_S")
@@ -60,6 +62,15 @@ def _get_item_key(path: str):
         return os.path.basename(path)
     else:
         return key.decode()
+
+
+def _get_uuid():
+    """Return a new UUID in String format.
+
+    :returns: String
+    """
+
+    return str(uuid.uuid4())
 
 
 def _makedirs(path: str, key: _KT = None):
@@ -226,9 +237,6 @@ class IODict(BaseClass):
             return items
 
         for item in os.scandir(self._db_path):
-            if not os.path.exists(item):
-                continue
-
             try:
                 items.append(
                     (
@@ -245,14 +253,14 @@ class IODict(BaseClass):
             return list()
         elif index is not None and isinstance(index, int):
             if not os.path.exists(items[index][-1]):
-                self.__iter__(index=index)
+                yield next(self.__iter__(index=index))
             else:
                 yield items[index][0]
         else:
             for item in items:
-                if not os.path.exists(item[-1]):
-                    continue
                 try:
+                    if not os.path.exists(item[-1]):
+                        continue
                     yield item[0]
                 except GeneratorExit:
                     pass
@@ -398,3 +406,111 @@ class IODict(BaseClass):
         """
         for item in self.__iter__():
             yield self.__getitem__(item)
+
+
+class DurableQueue:
+    """DurableQueue class, used to ensure queued items are disk backed.
+
+    This implements the standard Queue API, allowing the user to replace
+    queue.Queue or mulriprocessing.Queue with a DurableQueue.
+
+    DurableQueue is IODict backed.
+    """
+
+    def __init__(
+        self, path: str, lock: typing.Any = None, semaphore: typing.Any = None
+    ):
+        """Initiallize the DurableQueue class.
+
+        Durable queues use a semephore to keep track of the puts vs gets. When
+        a Durable queue is loaded, it will scan the queue for items, and set
+        the initial `_count` accordingly.
+
+        :param path: Storage path
+        :type path: String
+        :param lock: Lock type object
+        :type lock: Object
+        :param semaphore: Semaphore type object
+        :type semaphore: Object
+        """
+
+        if not semaphore:
+            semaphore = multiprocessing.Semaphore
+
+        self._queue = IODict(path=path, lock=lock)
+
+        self._count = semaphore(self.qsize())
+
+    def close(self):
+        """Close the current Queue and cleanup artifacts."""
+
+        self._queue.clear()
+        os.rmdir(self._queue._db_path)
+
+    def empty(self):
+        """Return True if the queue is empty, False otherwise.
+
+        :returns: Boolean
+        """
+
+        return self.qsize() == 0
+
+    def get(self, block: bool = True, timeout: float = None):
+        """Retrieve the first item from the queue.
+
+        :param block: Force the queue to block attempting to fetch an object.
+        :type block: Boolean
+        :param timeout: Set the block timeout
+        :type timeout: Float
+        :returns: Object
+        """
+
+        if timeout is not None and timeout < 0:
+            raise ValueError("timeout must be non-negative")
+
+        if not self._count.acquire(block, timeout):
+            raise queue.Empty
+
+        return self._queue.popitem()
+
+    def get_nowait(self):
+        """Retrieve the first item from the queue without blocking.
+
+        :returns: Object
+        """
+
+        return self.get(block=False)
+
+    def put(self, item: typing.Any, block: bool = True, timeout: float = None):
+        """Put a new item within the queue.
+
+        > The block and timeout options are present for API compatibility,
+          but are otherwise unused.
+
+        :param item: Object to be entered into the queue.
+        :type item: Object
+        :param block: Force the queue to block attempting to fetch an object.
+        :type block: Boolean
+        :param timeout: Set the block timeout
+        :type timeout: Float
+        """
+
+        self._queue[_get_uuid()] = item
+        self._count.release()
+
+    def put_nowait(self, item: typing.Any):
+        """Put a new item within the queue without blocking.
+
+        :param item: Object to be entered into the queue.
+        :type item: Object
+        """
+
+        self.put(item)
+
+    def qsize(self):
+        """Return the approximate size of the queue.
+
+        :returns: Integer
+        """
+
+        return len(self._queue)
