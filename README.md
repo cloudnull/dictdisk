@@ -1,17 +1,18 @@
 # IODict
 
-iodict is a thread safe dictionary implementation which uses a pure python
-object store. The dictionary implementation follows the `Dict` API, but stores
+iodict is a thread safe object store which is writting in pure python.
+
+The dictionary implementation follows the `Dict` API, but stores
 items using their **birthtime** allowing users to treat this datastore as a
 file system backed `OrderedDict`.
 
 > Items in the object store use file system attributes, when available to
   store key and birthtime information. File system attributes enhance the
   capability of the object store; however, they're not required. In the
-  event xattrs are not available, file stat is used for file creation time
-  along with base64 encoding for object keys.
+  event xattrs are not available, file stat is used for file creation time.
+  While stat works, in many cases, item ordering is not guarenteed.
 
-## Usage
+## Dictionary Usage
 
 ``` python
 import iodict
@@ -84,3 +85,53 @@ data = iodict.IODict(path='/tmp/iodict', lock=threading.Lock)
 
 The lock object allows the `iodict` to respect the locking paradigm of the
 executing application.
+
+## Durable Queue Usage
+
+The DurableQueue class is used to create a disk-backed queue which implements
+the standarad `queue.Queue` API.
+
+``` python
+import iodict
+q = iodict.DurableQueue(path='/tmp/iodict')  # Could be any path on the file system
+q.put("test")
+data = q.get()
+data
+'test'
+```
+
+## Flushing Capable Queue Usage
+
+The FlushQueue class is used to extend the capabilities of a standard queue
+object by providing an extension which can be used to flush the objects within
+queue to a disk. This is useful in situation when the application needs to halt
+or otherwise stop working, but the inflight processes need to be saved and
+resumed at a later time.
+
+``` python
+import queue
+
+import iodict
+
+
+class NewQueue(queue.Queue, iodict.FlushQueue):
+    def __init__(self, path, lock=None, semaphore=None):
+        super().__init__()
+        self.path = path
+        self.lock = lock
+        self.semaphore = semaphore
+
+
+q = NewQueue(path='/tmp/iodict')  # Could be any path on the file system
+q.put("test")
+q.qsize()
+1
+q.flush()
+q.qsize()
+0
+q.ingest()
+q.qsize()
+1
+q.get()
+'test'
+```

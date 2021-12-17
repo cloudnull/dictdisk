@@ -1,4 +1,5 @@
 import os
+import queue
 import sys
 import types
 
@@ -93,3 +94,37 @@ e()
 
 _D.clear()
 assert len(os.listdir("/tmp/test-iodict")) == 0
+
+
+_Q = iodict.DurableQueue(
+    path="/tmp/test-iodict-queue"
+)  # Could be any path on the file system
+_Q.put("test")
+assert _Q.qsize() == 1
+assert _Q.get() == "test"
+assert _Q.qsize() == 0
+_Q.put_nowait("test1")
+assert _Q.qsize() == 1
+assert _Q.get_nowait() == "test1"
+assert _Q.qsize() == 0
+_Q.close()
+
+
+class NewQueue(queue.Queue, iodict.FlushQueue):
+    def __init__(self, path, lock=None, semaphore=None):
+        super().__init__()
+        self.path = path
+        self.lock = lock
+        self.semaphore = semaphore
+
+
+q = NewQueue(
+    path="/tmp/test-iodict-queue-flush"
+)  # Could be any path on the file system
+q.put("test")
+assert q.qsize() == 1
+q.flush()
+assert q.qsize() == 0
+q.ingest()
+assert q.qsize() == 1
+assert q.get() == "test"

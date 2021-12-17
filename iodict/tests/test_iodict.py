@@ -11,7 +11,7 @@
 #   WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #   License for the specific language governing permissions and limitations
 #   under the License.
-from os import path
+
 import pickle
 import queue
 import unittest
@@ -611,6 +611,13 @@ class TestDurableQueue(BaseTest):
             q.close()
             mock_rmdir.assert_called_once_with("/not/a/path")
 
+    def test_close_missing(self):
+        q = iodict.DurableQueue(path="/not/a/path")
+        with patch("os.rmdir") as mock_rmdir:
+            mock_rmdir.side_effect = FileNotFoundError
+            q.close()
+            mock_rmdir.assert_called_once_with("/not/a/path")
+
     def test_empty(self):
         q = iodict.DurableQueue(path="/not/a/path")
         self.assertEqual(q.empty(), True)
@@ -661,3 +668,68 @@ class TestDurableQueue(BaseTest):
             mock__queue.return_value = dict()
             q.put_nowait("test")
             mock__queue.assert_called()
+
+
+class _FlushQueue(queue.Queue, iodict.FlushQueue):
+    def __init__(self, path, lock=None, semaphore=None):
+        super().__init__()
+        self.path = path
+        self.lock = lock
+        self.semaphore = semaphore
+
+
+class TestFlushQueue(BaseTest):
+    def setUp(self):
+        super().setUp()
+        self.patched_iodict = patch("iodict.IODict", autospec=True)
+        self.mock_iodict = self.patched_iodict.start()
+        self.m = self.mock_iodict.return_value = MagicMock()
+        self.m._db_path = "/not/a/path"
+        self.patched_queue = patch.object(self.m, "_queue", autospec=True)
+        self.mock__queue = self.patched_queue.start()
+        self.mock__queue.return_value = dict()
+
+    def tearDown(self):
+        super().tearDown()
+        self.patched_iodict.stop()
+        self.patched_queue.stop()
+
+    def test_flush_ingest(self):
+        q = _FlushQueue(path="/not/a/path")
+        for i in range(10):
+            q.put(i)
+
+        self.assertEqual(q.qsize(), 10)
+        q.flush()
+        self.assertEqual(q.qsize(), 0)
+        with patch("os.path.exists", autospec=True) as mock_exists:
+            mock_exists.return_value = True
+            with patch("os.rmdir", autospec=True) as mock_rmdir:
+                q.ingest()
+
+        mock_exists.assert_called()
+        mock_rmdir.assert_called()
+
+    def test_ingest_no_exists(self):
+        q = _FlushQueue(path="/not/a/path")
+        with patch("os.path.exists", autospec=True) as mock_exists:
+            mock_exists.return_value = False
+            q.ingest()
+        self.mock__queue.assert_not_called()
+
+    def test_ingest(self):
+        q = _FlushQueue(path="/not/a/path")
+        with patch("os.path.exists", autospec=True) as mock_exists:
+            mock_exists.return_value = True
+            with patch("iodict.DurableQueue") as mock_durablequeue:
+                m = mock_durablequeue.return_value = MagicMock()
+                g = m.get_nowait = MagicMock()
+                g.side_effect = ["a", KeyError]
+                q.ingest()
+        self.mock__queue.assert_not_called()
+
+    def test_flushqueue_attrs(self):
+        q = iodict.FlushQueue(path="/not/a/path")
+        self.assertEqual(q.path, "/not/a/path")
+        self.assertEqual(q.lock, None)
+        self.assertEqual(q.semaphore, None)

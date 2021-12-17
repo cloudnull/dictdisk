@@ -445,7 +445,10 @@ class DurableQueue:
         """Close the current Queue and cleanup artifacts."""
 
         self._queue.clear()
-        os.rmdir(self._queue._db_path)
+        try:
+            os.rmdir(self._queue._db_path)
+        except FileNotFoundError:
+            pass
 
     def empty(self):
         """Return True if the queue is empty, False otherwise.
@@ -514,3 +517,58 @@ class DurableQueue:
         """
 
         return len(self._queue)
+
+
+class FlushQueue:
+    def __init__(self, path, lock=None, semaphore=None):
+        """Queue class augmentation allowing queues to be flushed to disk.
+
+        This class requires a queue class to be used along with it.
+
+        >>> class _FlushQueue(queue.Queue, FlushQueue):
+        ...     def __init__(self, path, lock, semaphore):
+        ...         super().__init__()
+        ...         self.path = path
+        ...         self.lock = lock
+        ...         self.semaphore = semaphore
+
+        With multiple inheritence, we can create any queue object with flush
+        capabilities.
+        """
+
+        self.path = path
+        self.lock = lock
+        self.semaphore = semaphore
+
+    def flush(self):
+        """Flush all remaining items in queue to disk."""
+
+        durable = DurableQueue(
+            path=self.path, lock=self.lock, semaphore=self.semaphore
+        )
+        while True:
+            try:
+                item = self.get_nowait()
+            except Exception:
+                break
+            else:
+                durable.put(item)
+
+    def ingest(self):
+        """Check for existing items in queue and restore them."""
+
+        if not os.path.exists(self.path):
+            return
+
+        durable = DurableQueue(
+            path=self.path, lock=self.lock, semaphore=self.semaphore
+        )
+        while True:
+            try:
+                item = durable.get_nowait()
+            except Exception:
+                break
+            else:
+                self.put(item)
+
+        durable.close()
