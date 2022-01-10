@@ -1,6 +1,6 @@
 # IODict
 
-iodict is a thread safe object store which is writting in pure python.
+iodict is a thread safe object store which is written in pure python.
 
 The dictionary implementation follows the `Dict` API, but stores
 items using their **birthtime** allowing users to treat this datastore as a
