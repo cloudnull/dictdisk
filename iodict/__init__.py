@@ -24,6 +24,18 @@ import time
 import typing
 import uuid
 
+if os.uname().sysname == "Darwin":
+    import xattr
+
+    getxattr, setxattr, listxattr = (
+        xattr.getxattr,
+        xattr.setxattr,
+        xattr.listxattr,
+    )
+
+else:
+    getxattr, setxattr, listxattr = (os.getxattr, os.setxattr, os.listxattr)
+
 
 _S = typing.TypeVar("_S")
 _T = typing.TypeVar("_T")
@@ -39,7 +51,7 @@ def _get_create_time(path: str):
     :returns: Float
     """
     try:
-        birthtime = os.getxattr(path, "user.birthtime")
+        birthtime = getxattr(path, "user.birthtime")
         return struct.unpack(">d", birthtime)[0]
     except OSError:
         stat = os.stat(path)
@@ -55,7 +67,7 @@ def _get_item_key(path: str):
     :returns: String
     """
     try:
-        key = os.getxattr(path, "user.key")
+        key = getxattr(path, "user.key")
     except OSError:
         if not os.path.exists(path):
             raise FileNotFoundError(path) from None
@@ -110,9 +122,9 @@ def _setxattr(path: str, key: _KT = None):
     """
     try:
         try:
-            os.getxattr(path, "user.birthtime")
+            getxattr(path, "user.birthtime")
         except OSError:
-            os.setxattr(
+            setxattr(
                 path,
                 "user.birthtime",
                 struct.pack(">d", time.time()),
@@ -121,7 +133,7 @@ def _setxattr(path: str, key: _KT = None):
         pass
     else:
         if key:
-            os.setxattr(path, "user.key", key.encode())
+            setxattr(path, "user.key", key.encode())
 
 
 class BaseClass:
@@ -168,7 +180,7 @@ class IODict(BaseClass):
         self._db_path = os.path.abspath(os.path.expanduser(path))
         _makedirs(path=self._db_path)
         try:
-            os.listxattr(self._db_path)
+            listxattr(self._db_path)
         except Exception:
             self._encoder = str
         else:
