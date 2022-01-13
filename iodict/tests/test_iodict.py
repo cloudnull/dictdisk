@@ -75,20 +75,20 @@ class TestIODict(BaseTest):
         self.mock_makedirs.assert_called_with("/not/a/path", exist_ok=True)
         assert isinstance(d._lock, _thread.LockType)
 
-    @patch("os.listxattr", autospec=True)
+    @patch("iodict.listxattr", autospec=True)
     def test_init_xattr(self, mock_listxattr):
         mock_listxattr.return_value = ["user.birthtime"]
         d = iodict.IODict(path="/not/a/path")
         mock_listxattr.assert_called()
         assert d._encoder == iodict._object_sha3_224
 
-    @patch("os.listxattr", autospec=True)
+    @patch("iodict.listxattr", autospec=True)
     def test_init_no_xattr(self, mock_listxattr):
         mock_listxattr.side_effect = OSError("error")
         d = iodict.IODict(path="/not/a/path")
         assert d._encoder == str
 
-    @patch("os.listxattr", autospec=True)
+    @patch("iodict.listxattr", autospec=True)
     @patch("os.unlink", autospec=True)
     def test__delitem___(self, mock_unlink, mock_listxattr):
         d = iodict.IODict(path="/not/a/path")
@@ -111,7 +111,7 @@ class TestIODict(BaseTest):
             d.__delitem__("not-an-item")
 
     @patch("os.scandir", autospec=True)
-    @patch("os.listxattr", autospec=True)
+    @patch("iodict.listxattr", autospec=True)
     def test__exit__(self, mock_listxattr, mock_scandir):
         with patch("builtins.open", unittest.mock.mock_open()):
             with patch.object(
@@ -148,7 +148,7 @@ class TestIODict(BaseTest):
         mock_exists.return_value = True
         mock_scandir.return_value = [MockItem("file1"), MockItem("file2")]
         d = iodict.IODict(path="/not/a/path")
-        with patch("os.getxattr") as mock_getxattr:
+        with patch("iodict.getxattr") as mock_getxattr:
             mock_getxattr.side_effect = [
                 b"key1",
                 b"A\xd8kl\xc1\xb1\xd9]",
@@ -169,7 +169,7 @@ class TestIODict(BaseTest):
         mock_exists.return_value = True
         mock_scandir.return_value = [MockItem("file1")]
         d = iodict.IODict(path="/not/a/path")
-        with patch("os.getxattr") as mock_getxattr:
+        with patch("iodict.getxattr") as mock_getxattr:
             mock_getxattr.side_effect = [
                 b"key1",
                 b"A\xd8kn\x0f}\xda\x16",
@@ -198,7 +198,7 @@ class TestIODict(BaseTest):
             MockItem("key2"),
         ]
         d = iodict.IODict(path="/not/a/path")
-        with patch("os.getxattr") as mock_getxattr:
+        with patch("iodict.getxattr") as mock_getxattr:
             mock_getxattr.side_effect = OSError
             mock_stat.return_value = MockStat()
             return_items = [i for i in d.__iter__()]
@@ -215,7 +215,7 @@ class TestIODict(BaseTest):
         mock_exists.return_value = True
         mock_scandir.return_value = [MockItem("file1"), MockItem("file2")]
         d = iodict.IODict(path="/not/a/path")
-        with patch("os.getxattr") as mock_getxattr:
+        with patch("iodict.getxattr") as mock_getxattr:
             mock_getxattr.side_effect = [
                 b"key1",
                 b"A\xd8kn\x0f}\xda\x16",
@@ -247,7 +247,7 @@ class TestIODict(BaseTest):
             MockItem("file3"),
         ]
         d = iodict.IODict(path="/not/a/path")
-        with patch("os.getxattr") as mock_getxattr:
+        with patch("iodict.getxattr") as mock_getxattr:
             mock_getxattr.side_effect = [
                 b"key1",
                 b"A\xd8kn\x0f}\xda\x16",
@@ -268,7 +268,7 @@ class TestIODict(BaseTest):
             MockItem("file3"),
         ]
         d = iodict.IODict(path="/not/a/path")
-        with patch("os.getxattr") as mock_getxattr:
+        with patch("iodict.getxattr") as mock_getxattr:
             mock_getxattr.side_effect = [
                 b"key1",
                 b"A\xd8kn\x0f}\xda\x16",
@@ -288,7 +288,7 @@ class TestIODict(BaseTest):
             [MockItem("file2")],
         ]
         d = iodict.IODict(path="/not/a/path")
-        with patch("os.getxattr") as mock_getxattr:
+        with patch("iodict.getxattr") as mock_getxattr:
             mock_getxattr.side_effect = [
                 b"key1",
                 b"A\xd8kn\x0f}\xda\x16",
@@ -305,7 +305,7 @@ class TestIODict(BaseTest):
         mock_exists.side_effect = [True, True, GeneratorExit]
         mock_scandir.return_value = [MockItem("file1"), MockItem("file2")]
         d = iodict.IODict(path="/not/a/path")
-        with patch("os.getxattr") as mock_getxattr:
+        with patch("iodict.getxattr") as mock_getxattr:
             mock_getxattr.side_effect = [
                 b"key1",
                 b"A\xd8kl\xc1\xb1\xd9]",
@@ -327,9 +327,9 @@ class TestIODict(BaseTest):
             mock__iter__.return_value = ["file1", "file2"]
             self.assertEqual(len(d), 2)
 
-    @patch("os.setxattr", autospec=True)
-    @patch("os.getxattr", autospec=True)
-    @patch("os.listxattr", autospec=True)
+    @patch("iodict.setxattr", autospec=True)
+    @patch("iodict.getxattr", autospec=True)
+    @patch("iodict.listxattr", autospec=True)
     def test__setitem__(self, mock_listxattr, mock_getxattr, mock_setxattr):
         read_data = pickle.dumps({"a": 1})
         d = iodict.IODict(path="/not/a/path")
@@ -348,7 +348,7 @@ class TestIODict(BaseTest):
             b"not-an-item",
         )
 
-    @patch("os.getxattr", autospec=True)
+    @patch("iodict.getxattr", autospec=True)
     def test__setitem__no_xattrs(self, mock_getxattr):
         mock_getxattr.side_effect = OSError
         read_data = pickle.dumps({"a": 1})
@@ -387,7 +387,7 @@ class TestIODict(BaseTest):
             self.assertEqual(d.get("file1", "default"), "default")
 
     @patch("os.path.exists", autospec=True)
-    @patch("os.getxattr", autospec=True)
+    @patch("iodict.getxattr", autospec=True)
     def test__get_item_key(self, mock_getxattr, mock_exists):
         mock_getxattr.side_effect = [b"key1"]
         mock_exists.return_value = True
@@ -395,7 +395,7 @@ class TestIODict(BaseTest):
         self.assertEqual(keyname, "key1")
 
     @patch("os.path.exists", autospec=True)
-    @patch("os.getxattr", autospec=True)
+    @patch("iodict.getxattr", autospec=True)
     def test__get_item_key_unicode(self, mock_getxattr, mock_exists):
         mock_getxattr.side_effect = OSError
         mock_exists.return_value = True
@@ -403,7 +403,7 @@ class TestIODict(BaseTest):
         self.assertEqual(keyname, {})
 
     @patch("os.path.exists", autospec=True)
-    @patch("os.getxattr", autospec=True)
+    @patch("iodict.getxattr", autospec=True)
     def test__get_item_key_unicode(self, mock_getxattr, mock_exists):
         mock_getxattr.side_effect = OSError
         mock_exists.return_value = False
@@ -450,12 +450,12 @@ class TestIODict(BaseTest):
 
         self.assertEqual(return_items, ["file1", "file2"])
 
-    @patch("os.setxattr", autospec=True)
+    @patch("iodict.setxattr", autospec=True)
     def test__makedirs(self, mock_setxattr):
         iodict._makedirs("/not/a/path")
         self.mock_makedirs.assert_called_with("/not/a/path", exist_ok=True)
 
-    @patch("os.setxattr", autospec=True)
+    @patch("iodict.setxattr", autospec=True)
     def test__makedirs_key(self, mock_setxattr):
         iodict._makedirs("/not/a/path", key="things")
         self.mock_makedirs.assert_called_with("/not/a/path", exist_ok=True)
@@ -463,7 +463,7 @@ class TestIODict(BaseTest):
             "/not/a/path", "user.key", "things".encode()
         )
 
-    @patch("os.setxattr", autospec=True)
+    @patch("iodict.setxattr", autospec=True)
     @patch("os.unlink", autospec=True)
     def test__makedirs_file_exists(self, mock_unlink, mock_setxattr):
         self.mock_makedirs.side_effect = [FileExistsError, True]

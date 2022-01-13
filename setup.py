@@ -20,7 +20,7 @@ with open("README.md", "r", encoding="utf-8") as f:
     long_description = f.read()
 
 
-REQUIREMENTS = {}
+REQUIREMENTS = {"macos": ["xattr"]}
 
 
 setuptools.setup(
